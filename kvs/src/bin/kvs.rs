@@ -31,18 +31,21 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
-    let mut store = KvStore::open(current_dir().unwrap())?;
+    let mut store = KvStore::open(current_dir()?.as_path())?;
 
     if let Some(_matches) = matches.subcommand_matches("get") {
-        eprintln!("unimplemented");
-        exit(1);
+        let key = _matches.value_of("KEY").unwrap();
+        store.get(key.to_owned())?;
+        exit(0);
     } else if let Some(_matches) = matches.subcommand_matches("set") {
         let key = _matches.value_of("KEY").unwrap();
         let value = _matches.value_of("VALUE").unwrap();
-        store.set(key.to_owned(), value.to_owned());
+        store.set(key.to_owned(), value.to_owned())?;
+        exit(0);
     } else if let Some(_matches) = matches.subcommand_matches("rm") {
         let key = _matches.value_of("KEY").unwrap();
-        store.remove(key.to_owned());
+        store.remove(key.to_owned())?;
+        exit(0);
     }
     Ok(())
 }
