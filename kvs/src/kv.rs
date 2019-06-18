@@ -1,23 +1,33 @@
+use super::error::KvError;
 use super::error::Result;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::Seek;
+use std::io::{BufReader, BufWriter, Read, SeekFrom, Write};
+use std::option::Option;
 use std::path::Path;
 use std::path::PathBuf;
+use std::str;
 
 pub struct KvStore {
     store: HashMap<String, String>,
-    dir: PathBuf,
+    log_path: PathBuf,
     log_id: u32,
-    log: File,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Entry {
     key: String,
     value: String,
+    tag: Tag,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+enum Tag {
+    Normal,
+    Deleted,
 }
 
 impl KvStore {
@@ -50,47 +60,85 @@ impl KvStore {
         log_path.push(log_file_name.clone());
         //println!("{:?}", log_path);
 
-        let log_file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .read(true)
-            .open(log_path)
-            .unwrap();
+        // OpenOptions::new()
+        //     .append(true)
+        //     .create(true)
+        //     .read(true)
+        //     .open(log_path.clone())
+        //     .unwrap();
 
         Ok(KvStore {
             store: HashMap::new(),
-            dir: path,
+            log_path: log_path,
             log_id: 0,
-            log: log_file,
         })
     }
 
     pub fn set(&mut self, key: String, val: String) -> Result<()> {
-        //println!("set key: {}, value: {}", key, val);
-        let mut writer = BufWriter::new(&self.log);
+        self.append_to_log(key, val, Tag::Normal)?;
+        Ok(())
+    }
 
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+        self.load_log()?;
+        Ok(self.store.get(&key).cloned())
+    }
+
+    pub fn remove(&mut self, key: String) -> Result<()> {
+        self.load_log()?;
+        match self.store.get(&key) {
+            Some(val) => {
+                self.append_to_log(key.to_owned(), val.to_string(), Tag::Deleted)?;
+                Ok(())
+            }
+            None => Err(KvError::KeyNotExit),
+        }
+    }
+
+    fn append_to_log(&self, key: String, val: String, tag: Tag) -> Result<()> {
+        let file = self.open_log()?;
+        let mut writer = BufWriter::new(file);
         let entry = Entry {
             key: key.to_string(),
             value: val.to_string(),
+            tag: tag,
         };
 
         let serialized = serde_json::to_string(&entry).unwrap();
         writer.write_u32::<LE>(serialized.len() as u32)?;
         writer.write(serialized.as_bytes())?;
+        writer.flush()?;
         Ok(())
     }
 
-    pub fn get(&self, key: String) -> Result<std::option::Option<String>> {
-        let mut reader = BufReader::new(&self.log);
-        let mut serialized = String::new();
-        reader.read_to_string(&mut serialized)?;
-        println!("{}", serialized);
-        let entries: Vec<Entry> = serde_json::from_str(&serialized).unwrap();
-        Ok(self.store.get(&key).cloned())
+    fn load_log(&mut self) -> Result<()> {
+        let file = self.open_log()?;
+        let mut reader = BufReader::new(&file);
+        loop {
+            let entry_len = match reader.read_u32::<LE>() {
+                Ok(len) => len,
+                Err(_) => break,
+            };
+
+            let mut buf = vec![0; entry_len as usize];
+            reader.read_exact(&mut buf)?;
+            let entry: Entry = serde_json::from_str(str::from_utf8(&buf).unwrap()).unwrap();
+            if entry.tag == Tag::Normal {
+                self.store.insert(entry.key.clone(), entry.value.clone());
+            } else if entry.tag == Tag::Deleted {
+                self.store.remove(&entry.key);
+            }
+        }
+        Ok(())
     }
 
-    pub fn remove(&mut self, key: String) -> Result<()> {
-        self.store.remove(&key);
-        Ok(())
+    fn open_log(&self) -> Result<File> {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(self.log_path.as_path())
+            .unwrap();
+        Ok(file)
     }
 }

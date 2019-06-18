@@ -35,7 +35,10 @@ fn main() -> Result<()> {
 
     if let Some(_matches) = matches.subcommand_matches("get") {
         let key = _matches.value_of("KEY").unwrap();
-        store.get(key.to_owned())?;
+        match store.get(key.to_owned())? {
+            Some(value) => println!("{}", value),
+            None => println!("Key not found"),
+        };
         exit(0);
     } else if let Some(_matches) = matches.subcommand_matches("set") {
         let key = _matches.value_of("KEY").unwrap();
@@ -44,8 +47,15 @@ fn main() -> Result<()> {
         exit(0);
     } else if let Some(_matches) = matches.subcommand_matches("rm") {
         let key = _matches.value_of("KEY").unwrap();
-        store.remove(key.to_owned())?;
-        exit(0);
+        match store.remove(key.to_owned()) {
+            Err(_) => {
+                println!("Key not found");
+                exit(-1);
+            }
+            Ok(_) => {
+                exit(0);
+            }
+        };
     }
     Ok(())
 }

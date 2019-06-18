@@ -3,6 +3,9 @@ use std::io;
 pub enum KvError {
     #[fail(display = "io error")]
     IoError(#[fail(cause)] io::Error),
+
+    #[fail(display = "key not exit")]
+    KeyNotExit,
 }
 
 impl From<io::Error> for KvError {
