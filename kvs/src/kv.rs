@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::str;
 
 pub struct KvStore {
-    store: HashMap<String, String>,
+    memtable: HashMap<String, u64>,
     log_path: PathBuf,
     log_id: u32,
 }
@@ -59,19 +59,13 @@ impl KvStore {
         let mut log_path = path.clone();
         log_path.push(log_file_name.clone());
         //println!("{:?}", log_path);
-
-        // OpenOptions::new()
-        //     .append(true)
-        //     .create(true)
-        //     .read(true)
-        //     .open(log_path.clone())
-        //     .unwrap();
-
-        Ok(KvStore {
-            store: HashMap::new(),
+        let mut kv_store = KvStore {
+            memtable: HashMap::new(),
             log_path: log_path,
             log_id: 0,
-        })
+        };
+        kv_store.load_log()?;
+        Ok(kv_store)
     }
 
     pub fn set(&mut self, key: String, val: String) -> Result<()> {
@@ -79,23 +73,50 @@ impl KvStore {
         Ok(())
     }
 
-    pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        self.load_log()?;
-        Ok(self.store.get(&key).cloned())
+    pub fn get(&self, key: String) -> Result<Option<String>> {
+        match self.memtable.get(&key) {
+            Some(pos) => {
+                let file = self.open_log()?;
+                let mut reader = BufReader::new(&file);
+                Ok(Some(self.read_entry(&mut reader, pos.clone())?.value))
+            }
+            None => Ok(None),
+        }
     }
 
     pub fn remove(&mut self, key: String) -> Result<()> {
-        self.load_log()?;
-        match self.store.get(&key) {
-            Some(val) => {
-                self.append_to_log(key.to_owned(), val.to_string(), Tag::Deleted)?;
+        match self.memtable.get(&key) {
+            Some(_) => {
+                self.append_to_log(key.to_owned(), "".to_owned(), Tag::Deleted)?;
                 Ok(())
             }
             None => Err(KvError::KeyNotExit),
         }
     }
 
-    fn append_to_log(&self, key: String, val: String, tag: Tag) -> Result<()> {
+    fn read_entry(&self, reader: &mut BufReader<&File>, pos: u64) -> Result<Entry> {
+        reader.seek(SeekFrom::Start(pos))?;
+        let entry_len = match reader.read_u32::<LE>() {
+            Ok(len) => len,
+            Err(_) => return Err(KvError::KeyNotExit),
+        };
+
+        let mut buf = vec![0; entry_len as usize];
+        reader.read_exact(&mut buf)?;
+        let entry: Entry = serde_json::from_str(str::from_utf8(&buf).unwrap()).unwrap();
+        Ok(entry)
+    }
+
+    fn append_to_memtable(&mut self, entry: &Entry, pos: u64) -> Result<()> {
+        if entry.tag == Tag::Normal {
+            self.memtable.insert(entry.key.clone(), pos);
+        } else if entry.tag == Tag::Deleted {
+            self.memtable.remove(&entry.key);
+        }
+        Ok(())
+    }
+
+    fn append_to_log(&mut self, key: String, val: String, tag: Tag) -> Result<()> {
         let file = self.open_log()?;
         let mut writer = BufWriter::new(file);
         let entry = Entry {
@@ -104,10 +125,12 @@ impl KvStore {
             tag: tag,
         };
 
+        let pos = writer.seek(SeekFrom::End(0))?;
         let serialized = serde_json::to_string(&entry).unwrap();
         writer.write_u32::<LE>(serialized.len() as u32)?;
         writer.write(serialized.as_bytes())?;
         writer.flush()?;
+        self.append_to_memtable(&entry, pos)?;
         Ok(())
     }
 
@@ -115,19 +138,12 @@ impl KvStore {
         let file = self.open_log()?;
         let mut reader = BufReader::new(&file);
         loop {
-            let entry_len = match reader.read_u32::<LE>() {
-                Ok(len) => len,
+            let pos = reader.seek(SeekFrom::Current(0))?;
+            let entry = match self.read_entry(&mut reader, pos) {
+                Ok(entry) => entry,
                 Err(_) => break,
             };
-
-            let mut buf = vec![0; entry_len as usize];
-            reader.read_exact(&mut buf)?;
-            let entry: Entry = serde_json::from_str(str::from_utf8(&buf).unwrap()).unwrap();
-            if entry.tag == Tag::Normal {
-                self.store.insert(entry.key.clone(), entry.value.clone());
-            } else if entry.tag == Tag::Deleted {
-                self.store.remove(&entry.key);
-            }
+            self.append_to_memtable(&entry, pos)?;
         }
         Ok(())
     }
