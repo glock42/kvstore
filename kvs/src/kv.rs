@@ -12,9 +12,11 @@ use std::path::PathBuf;
 use std::str;
 
 pub struct KvStore {
-    memtable: HashMap<String, u64>,
-    log_path: PathBuf,
+    memtable: Box<HashMap<String, u64>>,
+    immutable: Box<HashMap<String, u64>>,
+    dir: PathBuf,
     log_id: u32,
+    append_num: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -28,6 +30,18 @@ pub struct Entry {
 enum Tag {
     Normal,
     Deleted,
+}
+
+const LOG_APPEND_NUM: u32 = 100;
+
+impl Entry {
+    fn new(k: String, v: String, t: Tag) -> Self {
+        Entry {
+            key: k,
+            value: v,
+            tag: t,
+        }
+    }
 }
 
 impl KvStore {
@@ -55,28 +69,26 @@ impl KvStore {
             }
         };
 
-        let log_file_name = format!("log_{}", log_id);
-        let mut log_path = path.clone();
-        log_path.push(log_file_name.clone());
-        //println!("{:?}", log_path);
         let mut kv_store = KvStore {
-            memtable: HashMap::new(),
-            log_path: log_path,
-            log_id: 0,
+            memtable: Box::new(HashMap::new()),
+            immutable: Box::new(HashMap::new()),
+            dir: path,
+            log_id: log_id,
+            append_num: 0,
         };
         kv_store.load_log()?;
         Ok(kv_store)
     }
 
     pub fn set(&mut self, key: String, val: String) -> Result<()> {
-        self.append_to_log(key, val, Tag::Normal)?;
+        self.start_write(key, val, Tag::Normal)?;
         Ok(())
     }
 
     pub fn get(&self, key: String) -> Result<Option<String>> {
         match self.memtable.get(&key) {
             Some(pos) => {
-                let file = self.open_log()?;
+                let file = self.open_log(self.get_log_path(self.log_id)?)?;
                 let mut reader = BufReader::new(&file);
                 Ok(Some(self.read_entry(&mut reader, pos.clone())?.value))
             }
@@ -87,7 +99,7 @@ impl KvStore {
     pub fn remove(&mut self, key: String) -> Result<()> {
         match self.memtable.get(&key) {
             Some(_) => {
-                self.append_to_log(key.to_owned(), "".to_owned(), Tag::Deleted)?;
+                self.start_write(key.to_owned(), "".to_owned(), Tag::Deleted)?;
                 Ok(())
             }
             None => Err(KvError::KeyNotExit),
@@ -107,6 +119,16 @@ impl KvStore {
         Ok(entry)
     }
 
+    fn append_entry(&self, entry: &Entry, file: &File) -> Result<(u64)> {
+        let mut writer = BufWriter::new(file);
+        let pos = writer.seek(SeekFrom::End(0))?;
+        let serialized = serde_json::to_string(&entry).unwrap();
+        writer.write_u32::<LE>(serialized.len() as u32)?;
+        writer.write(serialized.as_bytes())?;
+        writer.flush()?;
+        Ok(pos)
+    }
+
     fn append_to_memtable(&mut self, entry: &Entry, pos: u64) -> Result<()> {
         if entry.tag == Tag::Normal {
             self.memtable.insert(entry.key.clone(), pos);
@@ -116,26 +138,49 @@ impl KvStore {
         Ok(())
     }
 
-    fn append_to_log(&mut self, key: String, val: String, tag: Tag) -> Result<()> {
-        let file = self.open_log()?;
-        let mut writer = BufWriter::new(file);
-        let entry = Entry {
-            key: key.to_string(),
-            value: val.to_string(),
-            tag: tag,
-        };
-
-        let pos = writer.seek(SeekFrom::End(0))?;
-        let serialized = serde_json::to_string(&entry).unwrap();
-        writer.write_u32::<LE>(serialized.len() as u32)?;
-        writer.write(serialized.as_bytes())?;
-        writer.flush()?;
+    fn start_write(&mut self, key: String, val: String, tag: Tag) -> Result<()> {
+        let entry = Entry::new(key, val, tag);
+        let file = self.open_log(self.get_log_path(self.log_id)?)?;
+        let pos = self.append_entry(&entry, &file)?;
         self.append_to_memtable(&entry, pos)?;
+        self.append_num += 1;
+
+        if self.append_num >= LOG_APPEND_NUM {
+            self.compaction()?;
+            self.append_num = 0;
+        }
         Ok(())
     }
 
+    fn compaction(&mut self) -> Result<()> {
+        self.log_id += 1;
+        let read_file = self.open_log(self.get_log_path(self.log_id - 1)?)?;
+        let write_file = self.open_log(self.get_log_path(self.log_id)?)?;
+        let mut reader = BufReader::new(&read_file);
+        let mut new_mem: Box<HashMap<String, u64>> = Box::new(HashMap::new());
+
+        for (_, pointer) in self.memtable.iter() {
+            let entry = self.read_entry(&mut reader, *pointer)?;
+            let pos = self.append_entry(&entry, &write_file)?;
+            if entry.tag == Tag::Normal {
+                new_mem.insert(entry.key.clone(), pos);
+            } else if entry.tag == Tag::Deleted {
+                new_mem.remove(&entry.key);
+            }
+        }
+        self.memtable = new_mem;
+        Ok(())
+    }
+
+    fn get_log_path(&self, log_id: u32) -> Result<(PathBuf)> {
+        let log_file_name = format!("log_{}", log_id);
+        let mut log_path = self.dir.clone();
+        log_path.push(log_file_name);
+        Ok(log_path)
+    }
+
     fn load_log(&mut self) -> Result<()> {
-        let file = self.open_log()?;
+        let file = self.open_log(self.get_log_path(self.log_id)?)?;
         let mut reader = BufReader::new(&file);
         loop {
             let pos = reader.seek(SeekFrom::Current(0))?;
@@ -148,12 +193,12 @@ impl KvStore {
         Ok(())
     }
 
-    fn open_log(&self) -> Result<File> {
+    fn open_log(&self, path: PathBuf) -> Result<File> {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .read(true)
             .append(true)
-            .open(self.log_path.as_path())
+            .open(path.as_path())
             .unwrap();
         Ok(file)
     }
