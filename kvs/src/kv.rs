@@ -32,7 +32,7 @@ enum Tag {
     Deleted,
 }
 
-const LOG_APPEND_NUM: u32 = 100;
+const LOG_APPEND_NUM: u32 = 1000;
 
 impl Entry {
     fn new(k: String, v: String, t: Tag) -> Self {
@@ -58,14 +58,12 @@ impl KvStore {
                     .read(true)
                     .open(current.as_path())
                     .unwrap();
-                file.write_all(b"0")?;
+                file.write_u32::<LE>(log_id)?;
                 file.sync_all()?;
             }
             Ok(file) => {
                 let mut buf_reader = BufReader::new(&file);
-                let mut contents = String::new();
-                buf_reader.read_to_string(&mut contents)?;
-                log_id = contents.parse().unwrap();
+                log_id = buf_reader.read_u32::<LE>()?;
             }
         };
 
@@ -146,6 +144,7 @@ impl KvStore {
         self.append_num += 1;
 
         if self.append_num >= LOG_APPEND_NUM {
+            println!("start compaction!");
             self.compaction()?;
             self.append_num = 0;
         }
@@ -169,6 +168,7 @@ impl KvStore {
             }
         }
         self.memtable = new_mem;
+        std::fs::remove_file(self.get_log_path(self.log_id - 1)?)?;
         Ok(())
     }
 
@@ -201,5 +201,20 @@ impl KvStore {
             .open(path.as_path())
             .unwrap();
         Ok(file)
+    }
+}
+
+impl Drop for KvStore {
+    fn drop(&mut self) {
+        let mut current = self.dir.clone();
+        current.push("current");
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(current.as_path())
+            .unwrap();
+        file.write_u32::<LE>(self.log_id);
+        file.sync_all();
     }
 }
