@@ -3,9 +3,26 @@ use clap::{App, AppSettings, Arg, SubCommand};
 use kvs::KvStore;
 use kvs::Result;
 use std::env::current_dir;
+use std::net::SocketAddr;
 use std::process::exit;
 
+const DEFAULT_LISTENING_ADDRESS: &str = "127.0.0.1:4000";
+
 fn main() -> Result<()> {
+    let addr_arg = Arg::with_name("addr")
+        .value_name("IP_PORT")
+        .takes_value(true)
+        .short("a")
+        .long("addr")
+        .default_value(DEFAULT_LISTENING_ADDRESS)
+        .validator(|addr| {
+            if addr.parse::<SocketAddr>().is_ok() {
+                Ok(())
+            } else {
+                Err(String::from("the ip address format is error: IP:PORT"))
+            }
+        });
+
     let matches = App::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
@@ -17,17 +34,20 @@ fn main() -> Result<()> {
             SubCommand::with_name("set")
                 .about("Set the value of a string key to a string")
                 .arg(Arg::with_name("KEY").required(true))
-                .arg(Arg::with_name("VALUE").required(true)),
+                .arg(Arg::with_name("VALUE").required(true))
+                .arg(&addr_arg),
         )
         .subcommand(
             SubCommand::with_name("get")
                 .about("Get the string value of a given string key")
-                .arg(Arg::with_name("KEY").required(true)),
+                .arg(Arg::with_name("KEY").required(true))
+                .arg(&addr_arg),
         )
         .subcommand(
             SubCommand::with_name("rm")
                 .about("Remove a given key")
-                .arg(Arg::with_name("KEY").required(true)),
+                .arg(Arg::with_name("KEY").required(true))
+                .arg(&addr_arg),
         )
         .get_matches();
 

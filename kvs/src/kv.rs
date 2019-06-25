@@ -11,6 +11,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str;
 
+pub struct KvsEngine {}
+
 pub struct KvStore {
     memtable: Box<HashMap<String, u64>>,
     immutable: Box<HashMap<String, u64>>,
