@@ -1,5 +1,6 @@
-use super::error::KvError;
-use super::error::Result;
+use crate::engine::KvsEngine;
+use crate::error::KvError;
+use crate::error::Result;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -10,8 +11,6 @@ use std::option::Option;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str;
-
-pub struct KvsEngine {}
 
 pub struct KvStore {
     memtable: Box<HashMap<String, u64>>,
@@ -78,32 +77,6 @@ impl KvStore {
         };
         kv_store.load_log()?;
         Ok(kv_store)
-    }
-
-    pub fn set(&mut self, key: String, val: String) -> Result<()> {
-        self.start_write(key, val, Tag::Normal)?;
-        Ok(())
-    }
-
-    pub fn get(&self, key: String) -> Result<Option<String>> {
-        match self.memtable.get(&key) {
-            Some(pos) => {
-                let file = self.open_log(self.get_log_path(self.log_id)?)?;
-                let mut reader = BufReader::new(&file);
-                Ok(Some(self.read_entry(&mut reader, pos.clone())?.value))
-            }
-            None => Ok(None),
-        }
-    }
-
-    pub fn remove(&mut self, key: String) -> Result<()> {
-        match self.memtable.get(&key) {
-            Some(_) => {
-                self.start_write(key.to_owned(), "".to_owned(), Tag::Deleted)?;
-                Ok(())
-            }
-            None => Err(KvError::KeyNotExit),
-        }
     }
 
     fn read_entry(&self, reader: &mut BufReader<&File>, pos: u64) -> Result<Entry> {
@@ -203,6 +176,34 @@ impl KvStore {
             .open(path.as_path())
             .unwrap();
         Ok(file)
+    }
+}
+
+impl KvsEngine for KvStore {
+    fn set(&mut self, key: String, val: String) -> Result<()> {
+        self.start_write(key, val, Tag::Normal)?;
+        Ok(())
+    }
+
+    fn get(&self, key: String) -> Result<Option<String>> {
+        match self.memtable.get(&key) {
+            Some(pos) => {
+                let file = self.open_log(self.get_log_path(self.log_id)?)?;
+                let mut reader = BufReader::new(&file);
+                Ok(Some(self.read_entry(&mut reader, pos.clone())?.value))
+            }
+            None => Ok(None),
+        }
+    }
+
+    fn remove(&mut self, key: String) -> Result<()> {
+        match self.memtable.get(&key) {
+            Some(_) => {
+                self.start_write(key.to_owned(), "".to_owned(), Tag::Deleted)?;
+                Ok(())
+            }
+            None => Err(KvError::KeyNotExit),
+        }
     }
 }
 

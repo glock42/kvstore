@@ -2,15 +2,15 @@ extern crate clap;
 #[macro_use]
 extern crate log;
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
-use clap::{App, AppSettings, Arg, SubCommand};
+use clap::{App, Arg};
 use kvs::common::{Action, Command, Response};
+use kvs::engine::KvsEngine;
 use kvs::KvStore;
 use kvs::Result;
 use log::LevelFilter;
 use std::env::current_dir;
-use std::io;
 use std::io::prelude::*;
-use std::io::{BufReader, BufWriter, Read, SeekFrom, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::str;
 
@@ -73,8 +73,8 @@ fn run(addr: String, _engine: String) -> Result<()> {
 }
 
 fn handle_connection(stream: TcpStream) -> Result<()> {
-    let mut reader = io::BufReader::new(&stream);
-    let mut writer = io::BufWriter::new(&stream);
+    let mut reader = BufReader::new(&stream);
+    let mut writer = BufWriter::new(&stream);
     let command_len = reader.read_u32::<LE>()?;
     info!("server recv: {:?}", command_len);
     let mut buf = vec![0; command_len as usize];

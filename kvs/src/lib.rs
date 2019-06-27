@@ -1,8 +1,8 @@
 pub use common::Command;
+pub use engine::kv::KvStore;
+pub use engine::KvsEngine;
 pub use error::KvError;
 pub use error::Result;
-pub use kv::KvStore;
-pub use kv::KvsEngine;
 
 #[macro_use]
 extern crate failure;
@@ -12,5 +12,5 @@ extern crate serde;
 extern crate serde_json;
 
 pub mod common;
+pub mod engine;
 mod error;
-mod kv;
