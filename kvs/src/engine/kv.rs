@@ -53,7 +53,7 @@ impl KvStore {
         let mut log_id: u32 = 0;
         match File::open(current.as_path()) {
             Err(_) => {
-                let mut file = std::fs::OpenOptions::new()
+                let mut file = OpenOptions::new()
                     .create(true)
                     .write(true)
                     .read(true)
@@ -169,7 +169,7 @@ impl KvStore {
     }
 
     fn open_log(&self, path: PathBuf) -> Result<File> {
-        let file = std::fs::OpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .read(true)
             .append(true)
@@ -211,13 +211,13 @@ impl Drop for KvStore {
     fn drop(&mut self) {
         let mut current = self.dir.clone();
         current.push("current");
-        let mut file = std::fs::OpenOptions::new()
+        let mut file = OpenOptions::new()
             .create(true)
             .write(true)
             .read(true)
             .open(current.as_path())
             .unwrap();
-        file.write_u32::<LE>(self.log_id);
-        file.sync_all();
+        file.write_u32::<LE>(self.log_id).expect("write_u32 failed");
+        file.sync_all().expect("sync_all failed");
     }
 }

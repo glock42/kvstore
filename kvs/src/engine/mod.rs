@@ -7,3 +7,4 @@ pub trait KvsEngine {
 }
 
 pub mod kv;
+pub mod sled;

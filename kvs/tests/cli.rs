@@ -6,6 +6,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use tempfile::TempDir;
+#[macro_use]
+extern crate log;
+use log::LevelFilter;
 
 // `kvs-client` with no args should exit with a non-zero code.
 #[test]
@@ -184,7 +187,6 @@ fn cli_wrong_engine() {
             .unwrap();
         thread::sleep(Duration::from_secs(1));
         child.kill().expect("server exited before killed");
-
         let mut cmd = Command::cargo_bin("kvs-server").unwrap();
         cmd.args(&["--engine", "kvs", "--addr", "127.0.0.1:4003"])
             .current_dir(&temp_dir)
