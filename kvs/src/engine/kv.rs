@@ -46,7 +46,9 @@ impl Entry {
 }
 
 impl KvStore {
-    pub fn open(path: &Path) -> Result<KvStore> {
+    pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
+        let path = path.into();
+        std::fs::create_dir_all(&path)?;
         let path = PathBuf::from(path);
         let mut current = path.clone();
         current.push("current");
@@ -119,7 +121,6 @@ impl KvStore {
         self.append_num += 1;
 
         if self.append_num >= LOG_APPEND_NUM {
-            println!("start compaction!");
             self.compaction()?;
             self.append_num = 0;
         }
@@ -174,18 +175,20 @@ impl KvStore {
             .read(true)
             .append(true)
             .open(path.as_path())
-            .unwrap();
+            .expect("open log file failed");
         Ok(file)
     }
 }
 
 impl KvsEngine for KvStore {
     fn set(&mut self, key: String, val: String) -> Result<()> {
+        println!("set {}, {}", key, val);
         self.start_write(key, val, Tag::Normal)?;
         Ok(())
     }
 
     fn get(&self, key: String) -> Result<Option<String>> {
+        println!("get {}", key);
         match self.memtable.get(&key) {
             Some(pos) => {
                 let file = self.open_log(self.get_log_path(self.log_id)?)?;
