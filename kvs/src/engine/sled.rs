@@ -2,13 +2,14 @@ use crate::engine::KvsEngine;
 use crate::error::KvError;
 use crate::error::Result;
 use sled::{Db, Tree};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 pub struct SledKvsEngine {
     tree: sled::Db,
 }
 
 impl SledKvsEngine {
-    pub fn open(path: &Path) -> Result<SledKvsEngine> {
+    pub fn open(path: impl Into<PathBuf>) -> Result<SledKvsEngine> {
+        let path = path.into();
         Ok(SledKvsEngine {
             tree: Db::start_default(path)?,
         })
@@ -20,7 +21,7 @@ impl KvsEngine for SledKvsEngine {
         self.tree.flush()?;
         Ok(())
     }
-    fn get(&self, key: String) -> Result<Option<String>> {
+    fn get(&mut self, key: String) -> Result<Option<String>> {
         Ok(self
             .tree
             .get(key)?

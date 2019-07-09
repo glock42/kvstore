@@ -1,4 +1,5 @@
 use kvs::{KvStore, KvsEngine, Result};
+use std::path::Path;
 use tempfile::TempDir;
 use walkdir::WalkDir;
 
@@ -124,3 +125,14 @@ fn compaction() -> Result<()> {
 
     panic!("No compaction detected");
 }
+//#[test]
+//fn compact() -> Result<()> {
+//    let temp_dir = Path::new("/tmp/db");
+//    let mut store = KvStore::open(temp_dir.to_path_buf()).expect("unable to open kvstore");
+//    for j in 1..1000 {
+//        for i in 1..(1 << 12) {
+//            store.set(format!("key{}", i), "value".to_string()).unwrap();
+//        }
+//    }
+//    Ok(())
+//}
